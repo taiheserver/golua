@@ -54,6 +54,9 @@ import "C"
 
 import (
 	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
 	"unsafe"
 )
 
@@ -64,8 +67,45 @@ type LuaStackEntry struct {
 	CurrentLine int
 }
 
+// String returns a string representation of the LuaStackEntry
+func (l *LuaStackEntry) String() string {
+	var sb strings.Builder
+	l.ToString(&sb)
+	return sb.String()
+}
+
+func (l *LuaStackEntry) ToString(sb *strings.Builder, ext ...byte) {
+	sb.Write(ext)
+	sb.WriteString(l.Source)
+	sb.WriteString(":")
+	sb.WriteString(strconv.Itoa(l.CurrentLine))
+	sb.WriteString(": in function '")
+	sb.WriteString(l.Name)
+	sb.WriteString("'")
+}
+
+type LuaStackEntries []LuaStackEntry
+
+// String returns a string representation of the LuaStackEntries
+func (entries LuaStackEntries) String() string {
+	var sb strings.Builder
+	sb.WriteString("stack traceback:")
+	for _, entry := range entries {
+		entry.ToString(&sb, '\n', '\t')
+	}
+	return sb.String()
+}
+
 func newState(L *C.lua_State) *State {
-	newstate := &State{L, 0, make([]interface{}, 0, 8), make([]uint, 0, 8), nil, nil, nil}
+	newstate := &State{
+		s:           L,
+		Index:       0,
+		registry:    make([]interface{}, 0, 8),
+		freeIndices: make([]uint, 0, 8),
+		allocfn:     nil,
+		hookFn:      nil,
+		ctx:         nil,
+	}
 	registerGoState(newstate)
 	C.clua_setgostate(L, C.size_t(newstate.Index))
 	C.clua_initstate(L)
@@ -127,6 +167,9 @@ func (L *State) register(f interface{}) uint {
 func (L *State) unregister(fid uint) {
 	// fmt.Printf("Unregistering %d (len: %d, value: %v)\n", fid, len(L.registry), L.registry[fid])
 	if (fid < uint(len(L.registry))) && (L.registry[fid] != nil) {
+		if L.gcHook != nil {
+			L.gcHook(L.registry[fid])
+		}
 		L.registry[fid] = nil
 		L.addFreeIndex(fid)
 	}
@@ -203,6 +246,10 @@ func (L *State) SetMetaMethod(methodName string, f LuaGoFunction) {
 //
 // The user data will be rigged so that lua code can access and change to public members of simple types directly
 func (L *State) PushGoStruct(iface interface{}) {
+	rt := reflect.TypeOf(iface)
+	if rt.Kind() != reflect.Ptr && rt.Elem().Kind() != reflect.Struct {
+		panic(fmt.Sprintf("PushGoStruct: expected pointer to struct, got %v", rt))
+	}
 	iid := L.register(iface)
 	C.clua_pushgostruct(L.s, C.uint(iid))
 }
@@ -265,6 +312,7 @@ func (L *State) callEx(nargs, nresults int, catch bool) (err error) {
 	L.Remove(erridx)
 	if r != 0 {
 		err = &LuaError{r, L.ToString(-1), L.StackTrace()}
+		L.Pop(1) // 弹出错误信息
 		if !catch {
 			panic(err)
 		}
@@ -469,7 +517,15 @@ func (L *State) NewThread() *State {
 	// TODO: should have same lists as parent
 	//		but may complicate gc
 	s := C.lua_newthread(L.s)
-	return &State{s, 0, nil, nil, nil, nil, nil}
+	return &State{
+		s:           s,
+		Index:       0,
+		registry:    nil,
+		freeIndices: nil,
+		allocfn:     nil,
+		hookFn:      nil,
+		ctx:         nil,
+	}
 }
 
 // [lua_next] -> [-1, +(2|0), e]
@@ -607,25 +663,26 @@ func (L *State) Register(name string, f LuaGoFunction) {
 
 // Registers a map of go functions as a library that can be accessed using "require("name")"
 func (L *State) RegisterLibrary(name string, funcs map[string]LuaGoFunction) {
-	L.GetGlobal(name)
+	L.GetGlobal(name) // [table]
 	found := L.IsTable(-1)
 	if !found {
-		L.Pop(1)
-		L.CreateTable(0, len(funcs))
+		L.Pop(1)                     // []
+		L.CreateTable(0, len(funcs)) // [table]
 	}
 
 	for fname, f := range funcs {
-		L.PushGoFunction(f)
-		L.SetField(-2, fname)
+		L.PushGoFunction(f)   // [table, function]
+		L.SetField(-2, fname) // [table]
 	}
 
 	if !found {
-		L.GetGlobal("package")
-		L.GetField(-1, "loaded")
-		L.PushValue(-3)
-		L.SetField(-2, name)
-		L.Pop(2)
+		L.GetGlobal("package")   // [table, package]
+		L.GetField(-1, "loaded") // [table, package, package.loaded]
+		L.PushValue(-3)          // [table, package, package.loaded, table]
+		L.SetField(-2, name)     // [table, package, package.loaded]
+		L.Pop(2)                 // [table]
 	}
+	L.Pop(1) // []
 }
 
 // [lua_setallocf] -> [-0, +0, -]
@@ -834,6 +891,16 @@ func (L *State) SetHook(f HookFunction, instrNumber int) {
 	C.clua_sethook(L.s, C.int(instrNumber))
 }
 
+// Sets the error handler function
+func (L *State) SetErrorHandle(f ErrorHandler) {
+	L.errorHandler = f
+}
+
+// Sets the gc debug hook
+func (L *State) SetGCHook(f GCHook) {
+	L.gcHook = f
+}
+
 // Sets the maximum number of operations to execute at instrNumber, after this the execution ends
 // This and SetHook are mutual exclusive
 func (L *State) SetExecutionLimit(instrNumber int) {
@@ -843,8 +910,8 @@ func (L *State) SetExecutionLimit(instrNumber int) {
 }
 
 // Returns the current stack trace
-func (L *State) StackTrace() []LuaStackEntry {
-	r := []LuaStackEntry{}
+func (L *State) StackTrace() LuaStackEntries {
+	var r LuaStackEntries
 	var d C.lua_Debug
 	Sln := C.CString("Sln")
 	defer C.free(unsafe.Pointer(Sln))

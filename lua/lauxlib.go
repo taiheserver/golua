@@ -15,7 +15,7 @@ import (
 type LuaError struct {
 	code       int
 	message    string
-	stackTrace []LuaStackEntry
+	stackTrace LuaStackEntries
 }
 
 func (err *LuaError) Error() string {
@@ -26,7 +26,7 @@ func (err *LuaError) Code() int {
 	return err.code
 }
 
-func (err *LuaError) StackTrace() []LuaStackEntry {
+func (err *LuaError) StackTrace() LuaStackEntries {
 	return err.stackTrace
 }
 
@@ -107,9 +107,9 @@ func (L *State) CheckString(narg int) string {
 //
 // Checks whether the function argument narg is a string and searches for this string in the array lst (which must be NULL-terminated). Returns the index in the array where the string was found. Raises an error if the argument is not a string or if the string cannot be found.
 //
-// [luaL_checkoption]: https://www.lua.org/manual/5.1/manual.html#lual_checkoption
-//
 // BUG(everyone_involved): not implemented
+//
+// [luaL_checkoption]: https://www.lua.org/manual/5.1/manual.html#lual_checkoption
 func (L *State) CheckOption(narg int, def string, lst []string) int {
 	// TODO: complication: lst conversion to const char* lst[] from string slice
 	return 0

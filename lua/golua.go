@@ -14,6 +14,7 @@ import "C"
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -27,6 +28,12 @@ type LuaGoFunction func(L *State) int
 
 // This is the type of a go function that can be used as a lua_Hook
 type HookFunction func(L *State)
+
+// This is the type of a go function that can be used as a error handler
+type ErrorHandler func(L *State, reason string)
+
+// This is the type of a go function that can be used as a gc hook
+type GCHook func(v interface{})
 
 // The errorstring used by State.SetExecutionLimit
 const ExecutionQuantumExceeded = "Lua execution quantum exceeded"
@@ -52,6 +59,12 @@ type State struct {
 
 	// User defined hook function
 	hookFn HookFunction
+
+	// User defined error handle
+	errorHandler ErrorHandler
+
+	// gc hook. for DEBUG
+	gcHook GCHook
 
 	ctx context.Context
 }
@@ -85,11 +98,18 @@ func getGoState(gostateindex uintptr) *State {
 }
 
 //export golua_callgofunction
-func golua_callgofunction(gostateindex uintptr, fid uint) int {
+func golua_callgofunction(gostateindex uintptr, fid uint) (re int) {
 	L1 := getGoState(gostateindex)
-	if fid < 0 {
-		panic(&LuaError{0, "Requested execution of an unknown function", L1.StackTrace()})
+	if fid < 0 || fid >= uint(len(L1.registry)) {
+		L1.PushString("requested execution of an unknown function")
+		return -1
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			L1.PushString(fmt.Sprintf("[GO PANIC] %v", r))
+			re = -1
+		}
+	}()
 	f := L1.registry[fid].(LuaGoFunction)
 	return f(L1)
 }
@@ -113,6 +133,11 @@ func golua_interface_newindex_callback(gostateindex uintptr, iid uint, field_nam
 	field_name := C.GoString(field_name_cstr)
 
 	fval := ifacevalue.FieldByName(field_name)
+
+	if !fval.IsValid() {
+		L.PushString(fmt.Sprintf("field %s.%s not found", ifacevalue.Type().Name(), field_name))
+		return -1
+	}
 
 	if fval.Kind() == reflect.Ptr {
 		fval = fval.Elem()
@@ -195,7 +220,7 @@ func golua_interface_newindex_callback(gostateindex uintptr, iid uint, field_nam
 		}
 	}
 
-	L.PushString("Unsupported type of field " + field_name + ": " + fval.Type().String())
+	L.PushString(fmt.Sprintf("unsupported set %s.%s, type %s ", ifacevalue.Type().Name(), field_name, fval.Type().String()))
 	return -1
 }
 
@@ -205,7 +230,13 @@ func golua_interface_index_callback(gostateindex uintptr, iid uint, field_name *
 	iface := L.registry[iid]
 	ifacevalue := reflect.ValueOf(iface).Elem()
 
-	fval := ifacevalue.FieldByName(C.GoString(field_name))
+	fieldName := C.GoString(field_name)
+	fval := ifacevalue.FieldByName(fieldName)
+
+	if !fval.IsValid() {
+		L.PushString(fmt.Sprintf("field %s.%s not found", ifacevalue.Type().Name(), fieldName))
+		return -1
+	}
 
 	if fval.Kind() == reflect.Ptr {
 		fval = fval.Elem()
@@ -256,7 +287,7 @@ func golua_interface_index_callback(gostateindex uintptr, iid uint, field_name *
 		}
 	}
 
-	L.PushString("Unsupported type of field: " + fval.Type().String())
+	L.PushString(fmt.Sprintf("unsupported get %s.%s, type %s ", ifacevalue.Type().Name(), fieldName, fval.Type().String()))
 	return -1
 }
 
@@ -294,5 +325,9 @@ func go_panic_msghandler(gostateindex uintptr, z *C.char) {
 	L := getGoState(gostateindex)
 	s := C.GoString(z)
 
-	panic(&LuaError{LUA_ERRERR, s, L.StackTrace()})
+	if L.errorHandler != nil {
+		L.errorHandler(L, s)
+	}
+	// 去掉 panic, 让 vm 可以继续执行
+	// panic(&LuaError{LUA_ERRERR, s, L.StackTrace()})
 }

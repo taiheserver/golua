@@ -68,6 +68,15 @@ size_t clua_getgostate(lua_State* L)
 }
 
 
+int go_ret_handle(lua_State* L, int ret)
+{
+	if (ret < 0)
+	{
+		return lua_error(L);
+	}
+	return ret;
+}
+
 //wrapper for callgofunction
 int callback_function(lua_State* L)
 {
@@ -76,7 +85,7 @@ int callback_function(lua_State* L)
 	size_t gostateindex = clua_getgostate(L);
 	//remove the go function from the stack (to present same behavior as lua_CFunctions)
 	lua_remove(L,1);
-	return golua_callgofunction(gostateindex, fid!=NULL ? *fid : -1);
+	return go_ret_handle(L, golua_callgofunction(gostateindex, fid!=NULL ? *fid : -1));
 }
 
 //wrapper for gchook
@@ -114,7 +123,7 @@ static int callback_c (lua_State* L)
 {
 	int fid = clua_togofunction(L,lua_upvalueindex(1));
 	size_t gostateindex = clua_getgostate(L);
-	return golua_callgofunction(gostateindex,fid);
+	return go_ret_handle(L, golua_callgofunction(gostateindex,fid));
 }
 
 void clua_pushcallback(lua_State* L, unsigned int nup)
@@ -169,8 +178,7 @@ int interface_index_callback(lua_State *L)
 
 	if (r < 0)
 	{
-		lua_error(L);
-		return 0;
+		return lua_error(L);
 	}
 	else
 	{
@@ -201,8 +209,7 @@ int interface_newindex_callback(lua_State *L)
 
 	if (r < 0)
 	{
-		lua_error(L);
-		return 0;
+		return lua_error(L);
 	}
 	else
 	{
@@ -214,20 +221,20 @@ int panic_msghandler(lua_State *L)
 {
 	size_t gostateindex = clua_getgostate(L);
 	go_panic_msghandler(gostateindex, (char *)lua_tolstring(L, -1, NULL));
-	return 0;
+	return 1;
 }
 
 void clua_hide_pcall(lua_State *L)
 {
-	lua_getglobal(L, "pcall");
-	lua_setglobal(L, "unsafe_pcall");
-	lua_pushnil(L);
-	lua_setglobal(L, "pcall");
+	// lua_getglobal(L, "pcall");
+	// lua_setglobal(L, "unsafe_pcall");
+	// lua_pushnil(L);
+	// lua_setglobal(L, "pcall");
 
-	lua_getglobal(L, "xpcall");
-	lua_setglobal(L, "unsafe_xpcall");
-	lua_pushnil(L);
-	lua_setglobal(L, "xpcall");
+	// lua_getglobal(L, "xpcall");
+	// lua_setglobal(L, "unsafe_xpcall");
+	// lua_pushnil(L);
+	// lua_setglobal(L, "xpcall");
 }
 
 void clua_initstate(lua_State* L)
