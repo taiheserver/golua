@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/aarzilli/golua/lua"
+	"github.com/taiheserver/golua/lua"
 )
 
 func divPanic(L *lua.State) int {
