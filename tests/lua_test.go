@@ -124,7 +124,7 @@ func TestPcall(t *testing.T) {
 	err := L.DoFile("test.lua")
 	if err != nil {
 		checkTop(L, t)
-		t.Fatal(err)
+		t.Fatalf("DoFile: %v", err)
 	}
 	runTest(t, L)
 	L.Pop(1)
@@ -150,9 +150,7 @@ func TestChunkLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var name = []byte{
-		'1', '2', '3', 0,
-	}
+	var name = append([]byte("test.lua"), 0)
 
 	if ret := L.UnsafeLoad(data, name); ret != 0 {
 		msg := L.ToString(-1)

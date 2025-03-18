@@ -135,10 +135,16 @@ func (L *State) CheckUdata(narg int, tname string) unsafe.Pointer {
 	return unsafe.Pointer(C.luaL_checkudata(L.s, C.int(narg), Ctname))
 }
 
+func (L *State) popError() *LuaError {
+	msg := L.ToString(-1)
+	L.Pop(1)
+	return &LuaError{code: 0, message: msg, stackTrace: L.StackTrace()}
+}
+
 // Executes file, returns nil for no errors or the lua error string on failure
 func (L *State) DoFile(filename string) error {
 	if r := L.LoadFile(filename); r != 0 {
-		return &LuaError{r, L.ToString(-1), L.StackTrace()}
+		return L.popError()
 	}
 	return L.Call(0, LUA_MULTRET)
 }
@@ -146,7 +152,7 @@ func (L *State) DoFile(filename string) error {
 // Executes the string, returns nil for no errors or the lua error string on failure
 func (L *State) DoString(str string) error {
 	if r := L.LoadString(str); r != 0 {
-		return &LuaError{r, L.ToString(-1), L.StackTrace()}
+		return L.popError()
 	}
 	return L.Call(0, LUA_MULTRET)
 }
@@ -252,6 +258,7 @@ func (L *State) Load(bs []byte, name string) int {
 // Loads a Lua chunk. If there are no errors, lua_load pushes the compiled chunk as a Lua function on top of the stack. Otherwise, it pushes an error message. The return values of lua_load are:
 //
 // try zero-copy version of Load
+// name must be null-terminated
 // [lua_load]: https://www.lua.org/manual/5.1/manual.html#lua_load
 func (L *State) UnsafeLoad(chunk, name []byte) int {
 	if len(name) == 0 || name[len(name)-1] != 0 {

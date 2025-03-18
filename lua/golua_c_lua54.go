@@ -53,7 +53,7 @@ int load_chunk(lua_State *L, char *b, int size, const char* chunk_name) {
 	int err;
 	err = lua_load(L, reader, &ck, chunk_name, NULL);
 	if (err != 0) {
-		return luaL_error(L, "unable to load chunk, err: %d", err);
+		return err;
 	}
 	return 0;
 }
@@ -114,8 +114,8 @@ int dump_chunk (lua_State *L) {
 	luaL_buffinit(L,&b);
 	int err;
 	err = lua_dump(L, writer, &b, 0);
-	if (err != 0){
-	return luaL_error(L, "unable to dump given function, err:%d", err);
+	if (err != 0) {
+		return err;
 	}
 	luaL_pushresult(&b);
 	return 0;

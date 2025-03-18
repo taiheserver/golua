@@ -311,8 +311,7 @@ func (L *State) callEx(nargs, nresults int, catch bool) (err error) {
 	r := L.pcall(nargs, nresults, erridx)
 	L.Remove(erridx)
 	if r != 0 {
-		err = &LuaError{r, L.ToString(-1), L.StackTrace()}
-		L.Pop(1) // 弹出错误信息
+		err = L.popError()
 		if !catch {
 			panic(err)
 		}
