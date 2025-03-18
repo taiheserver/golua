@@ -247,6 +247,19 @@ func (L *State) Load(bs []byte, name string) int {
 	return 0
 }
 
+// [lua_load] -> [-0, +1, -]
+//
+// Loads a Lua chunk. If there are no errors, lua_load pushes the compiled chunk as a Lua function on top of the stack. Otherwise, it pushes an error message. The return values of lua_load are:
+//
+// try zero-copy version of Load
+// [lua_load]: https://www.lua.org/manual/5.1/manual.html#lua_load
+func (L *State) UnsafeLoad(chunk, name []byte) int {
+	if len(name) == 0 || name[len(name)-1] != 0 {
+		name = append(name, 0)
+	}
+	return int(C.load_chunk(L.s, (*C.char)(unsafe.Pointer(&chunk[0])), C.int(len(chunk)), (*C.char)(unsafe.Pointer(&name[0]))))
+}
+
 // [luaL_newmetatable] -> [-0, +1, m]
 //
 // If the registry already has the key tname, returns 0. Otherwise, creates a new table to be used as a metatable for userdata, adds it to the registry with key tname, and returns 1.

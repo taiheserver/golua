@@ -2,6 +2,7 @@ package tests
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 
@@ -30,9 +31,12 @@ func div(L *lua.State) int {
 	return 1
 }
 
-func checkTop(L *lua.State, t interface {
+type testingT interface {
+	Fatal(args ...interface{})
 	Fatalf(format string, args ...interface{})
-}) {
+}
+
+func checkTop(L *lua.State, t testingT) {
 	if L.GetTop() != 0 {
 		t.Fatalf("stack not empty: %d", L.GetTop())
 	}
@@ -95,6 +99,22 @@ func TestError(t *testing.T) {
 	})
 }
 
+func runTest(t *testing.T, L *lua.State) {
+	if !L.IsTable(-1) {
+		t.Fatalf("not a table: %v", L.Typename(-1))
+	}
+	L.GetField(-1, "do_pcall_fn")
+	err := L.Call(0, 0)
+	if err != nil {
+		t.Fatalf("do_pcall_fn: %v", err)
+	}
+	L.GetField(-1, "do_xpcall_fn")
+	err = L.Call(0, 0)
+	if err != nil {
+		t.Fatalf("do_xpcall_fn: %v", err)
+	}
+}
+
 func TestPcall(t *testing.T) {
 	L, cancel := initLuaState()
 	defer cancel()
@@ -106,7 +126,116 @@ func TestPcall(t *testing.T) {
 		checkTop(L, t)
 		t.Fatal(err)
 	}
+	runTest(t, L)
+	L.Pop(1)
 	checkTop(L, t)
+}
+
+func TestChunkLoad(t *testing.T) {
+
+	L, cancel := initLuaState()
+
+	run := func() {
+		if err := L.Call(0, 1); err != nil {
+			t.Fatal(err)
+		}
+		runTest(t, L)
+	}
+
+	L.Register("div", div)
+	L.Register("divPanic", divPanic)
+
+	data, err := os.ReadFile("test.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var name = []byte{
+		'1', '2', '3', 0,
+	}
+
+	if ret := L.UnsafeLoad(data, name); ret != 0 {
+		msg := L.ToString(-1)
+		L.Pop(1)
+		checkTop(L, t)
+		t.Fatalf("load: %v", msg)
+	}
+	if L.Dump() != 0 {
+		err := L.ToString(-1)
+		t.Fatalf("dump: %v", err)
+	}
+	chunk := L.ToBytes(-1)
+	L.Pop(2)
+	checkTop(L, t)
+
+	if ret := L.UnsafeLoad(chunk, name); ret != 0 {
+		msg := L.ToString(-1)
+		L.Pop(1)
+		checkTop(L, t)
+		t.Fatalf("load: %v", msg)
+	}
+	run()
+	L.Pop(1)
+	checkTop(L, t)
+	cancel()
+}
+
+func BenchmarkLuaLoad(b *testing.B) {
+
+	data, err := os.ReadFile("test.lua")
+	if err != nil {
+		b.Fatal(err)
+	}
+	L, cancel := initLuaState()
+	_ = cancel
+
+	var name = []byte{
+		'1', '2', '3', 0,
+	}
+
+	if ret := L.UnsafeLoad(data, name); ret != 0 {
+		msg := L.ToString(-1)
+		L.Pop(1)
+		checkTop(L, b)
+		b.Fatalf("load: %v", msg)
+	}
+	if L.Dump() != 0 {
+		err := L.ToString(-1)
+		b.Fatalf("dump: %v", err)
+	}
+	chunk := L.ToBytes(-1)
+	L.Pop(2)
+	cancel()
+
+	b.Run("FileLoad", func(b *testing.B) {
+		L, _ := initLuaState()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			ret := L.UnsafeLoad(data, name)
+			if ret != 0 {
+				msg := L.ToString(-1)
+				L.Pop(1)
+				b.Fatalf("load: %v", msg)
+			}
+			L.Pop(1)
+		}
+	})
+
+	// _ = L.Load(chunk, "123")
+
+	b.Run("ChunkLoad", func(b *testing.B) {
+		L, _ := initLuaState()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			ret := L.UnsafeLoad(chunk, name)
+			if ret != 0 {
+				msg := L.ToString(-1)
+				L.Pop(1)
+				b.Fatalf("load: %v", msg)
+			}
+			L.Pop(1)
+		}
+	})
 }
 
 type Data struct {
