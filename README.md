@@ -5,7 +5,7 @@ Go Bindings for the lua C API
 
 Simplest way to install:
 
-	# go get github.com/aarzilli/golua/lua
+	# go get github.com/taiheserver/golua
 
 You can then try to run the examples:
 
