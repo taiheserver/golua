@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/aarzilli/golua/lua"
-	"fmt"
 	"errors"
+	"fmt"
 	"os"
+
+	"github.com/taiheserver/golua/lua"
 )
 
 func testDefault(L *lua.State) {

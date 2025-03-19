@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/aarzilli/golua/lua"
 	"fmt"
+
+	"github.com/taiheserver/golua/lua"
 )
 
 func test(L *lua.State) int {
@@ -32,7 +33,7 @@ func main() {
 
 	// force a panic
 	L.PushNil()
-	L.Call(0, 0)
+	err := L.Call(0, 0)
 
-	fmt.Println("End")
+	fmt.Println("End", err)
 }
